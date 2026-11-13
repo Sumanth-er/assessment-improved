@@ -11,7 +11,23 @@ from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.llms import AIServiceUnavailable
+from core.assessment_timing import remaining_active_seconds
 from core.auth import get_password_hash, require_admin
+from core.coding_llm_review import (
+    DEFAULT_CODING_LLM_INSTRUCTIONS,
+    CodingLLMSettings,
+    get_coding_llm_settings,
+    save_coding_llm_settings,
+)
+from core.improvement_plan import (
+    ImprovementPlanOut,
+    append_improvement_summary,
+    get_or_create_improvement_plan,
+    improvement_cells,
+    improvement_headers,
+    load_improvement_plan,
+)
 from core.logger import get_logger
 from core.uploads import read_upload_limited
 from db.database import SessionLocal
@@ -49,6 +65,7 @@ from db.models import (
     Answer,
     AttemptStatus,
     AttemptIntegrityEvent,
+    AttemptImprovementPlan,
     QuestionEmbedding,
     InterviewAccessRequest,
     InterviewAccessStatus,
@@ -493,6 +510,71 @@ async def reset_user_attempt(
     return await run_db_sync(_sync_work)
 
 
+@router.post("/resume-attempt/{attempt_id}", response_model=MessageResponse)
+async def resume_user_attempt(
+    attempt_id: UUID,
+    _admin: User = Depends(require_admin),
+):
+    """Reopen an attempt stopped by the tab-violation limit, with the violation count reset.
+
+    Unlike Retest, the same attempt continues with its saved answers and remaining
+    active time. Only the partial evaluation is discarded; it is redone after submission.
+    """
+    def _sync_work():
+        db = SessionLocal()
+        try:
+            attempt = db.query(Attempt).filter(Attempt.id == attempt_id).with_for_update().first()
+            if not attempt:
+                raise HTTPException(status_code=404, detail="Attempt not found")
+            if attempt.status != AttemptStatus.missed:
+                raise HTTPException(status_code=409, detail="Only attempts stopped by the tab-violation limit can be resumed.")
+            assessment = db.query(Assessment).filter(Assessment.id == attempt.assessment_id).first()
+            if not assessment:
+                raise HTTPException(status_code=404, detail="Assessment not found")
+            now = datetime.now(timezone.utc)
+            if assessment.end_time and now >= as_utc_aware(assessment.end_time):
+                raise HTTPException(status_code=409, detail="The assessment window has closed, so this attempt cannot be resumed. Use Retest instead.")
+            if remaining_active_seconds(attempt, assessment.duration or 60, now) <= 0:
+                raise HTTPException(status_code=409, detail="No assessment time is left for this attempt. Use Retest instead.")
+            evaluation_job = (
+                db.query(EvaluationJob)
+                .filter(EvaluationJob.attempt_id == attempt_id)
+                .with_for_update()
+                .first()
+            )
+            if evaluation_job and evaluation_job.status == EvaluationJobStatus.in_progress:
+                raise HTTPException(status_code=409, detail="This attempt is being evaluated right now. Try again in a moment.")
+
+            # Keep the answers; discard the partial evaluation so it is redone after submission.
+            if evaluation_job:
+                db.delete(evaluation_job)
+            db.query(TopicScore).filter(TopicScore.attempt_id == attempt_id).delete(synchronize_session="fetch")
+            db.query(AttemptImprovementPlan).filter(
+                AttemptImprovementPlan.attempt_id == attempt_id
+            ).delete(synchronize_session="fetch")
+            db.query(Answer).filter(Answer.attempt_id == attempt_id).update(
+                {Answer.score: None, Answer.evaluated_by: None, Answer.feedback: None},
+                synchronize_session="fetch",
+            )
+            attempt.status = AttemptStatus.in_progress
+            attempt.score = None
+            attempt.submitted_at = None
+            attempt.sync_deadline_at = None
+            attempt.active_started_at = None
+            attempt.active_heartbeat_at = None
+            attempt.tab_violations = 0
+            try:
+                db.commit()
+            except IntegrityError:
+                db.rollback()
+                raise HTTPException(status_code=409, detail="The user already has another active attempt for this assessment.")
+            return {"message": "Attempt reopened and violation count reset. The user can resume it from their dashboard."}
+        finally:
+            db.close()
+
+    return await run_db_sync(_sync_work)
+
+
 class TopicScoreDetail(BaseModel):
     topic_name: str
     total: int
@@ -807,6 +889,7 @@ async def export_attempt_results(
 
             username = user.username if user else "unknown"
             user_name = user.name if user else "Unknown"
+            plan = load_improvement_plan(db, attempt.id)
 
             workbook = Workbook()
             summary_sheet = workbook.active
@@ -828,6 +911,7 @@ async def export_attempt_results(
                     topic_score.get("total"),
                     topic_score.get("percentage"),
                 ])
+            append_improvement_summary(summary_sheet, plan)
 
             detail_sheet = workbook.create_sheet("Question Review")
             detail_sheet.append([
@@ -839,6 +923,7 @@ async def export_attempt_results(
                 "Correct Answer",
                 "Score",
                 "Suggestion",
+                *improvement_headers(plan),
             ])
             for index, answer in enumerate(results.get("answers", []), start=1):
                 detail_sheet.append([
@@ -850,6 +935,7 @@ async def export_attempt_results(
                     answer.get("correct_answer"),
                     answer_score_label(answer.get("answer_status", "awaiting_evaluation"), answer.get("score")),
                     answer.get("suggestion") or "",
+                    *improvement_cells(plan, answer),
                 ])
 
             buffer = BytesIO()
@@ -872,6 +958,19 @@ async def export_attempt_results(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{payload["filename"]}"'},
     )
+
+
+@router.post("/attempt/{attempt_id}/improvement-plan", response_model=ImprovementPlanOut)
+async def get_attempt_improvement_plan(
+    attempt_id: UUID,
+    regenerate: bool = False,
+    _admin: User = Depends(require_admin),
+):
+    """Get Improvement Areas for an evaluated attempt; regenerate=true replaces the stored plan."""
+    try:
+        return await run_db_sync(get_or_create_improvement_plan, attempt_id, regenerate=regenerate)
+    except AIServiceUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 class UserTopicPerformance(BaseModel):
@@ -2030,3 +2129,43 @@ async def create_assessment_from_import(
 
     res = await run_db_sync(_sync_work)
     return res
+
+
+# ---------- Settings: LLM evaluation for coding questions ---------- #
+
+
+class CodingEvaluationSettingsOut(BaseModel):
+    enabled: bool
+    prompt: str
+    default_prompt: str
+
+
+@router.get("/settings/coding-evaluation", response_model=CodingEvaluationSettingsOut)
+async def get_coding_evaluation_settings(_admin: User = Depends(require_admin)):
+    """Whether Python coding answers are graded by the LLM instead of test cases."""
+    def _sync_work():
+        db = SessionLocal()
+        try:
+            settings = get_coding_llm_settings(db)
+            return {**settings.model_dump(), "default_prompt": DEFAULT_CODING_LLM_INSTRUCTIONS}
+        finally:
+            db.close()
+
+    return await run_db_sync(_sync_work)
+
+
+@router.put("/settings/coding-evaluation", response_model=CodingEvaluationSettingsOut)
+async def update_coding_evaluation_settings(
+    body: CodingLLMSettings,
+    _admin: User = Depends(require_admin),
+):
+    """Turn LLM grading of Python coding answers on or off and set its grading prompt."""
+    def _sync_work():
+        db = SessionLocal()
+        try:
+            settings = save_coding_llm_settings(db, body)
+            return {**settings.model_dump(), "default_prompt": DEFAULT_CODING_LLM_INSTRUCTIONS}
+        finally:
+            db.close()
+
+    return await run_db_sync(_sync_work)

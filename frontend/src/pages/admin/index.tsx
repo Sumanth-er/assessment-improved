@@ -12,9 +12,10 @@ import Results from "./Results";
 import Interviews from "./Interviews";
 import InterviewResults from "./InterviewResults";
 import QuestionGeneration from "./QuestionGeneration";
+import Settings from "./Settings";
 import Toast from "../../components/Toast";
 
-type Tab = "dashboard" | "approvals" | "users" | "assessments" | "questions" | "generate" | "batches" | "results" | "interviews" | "interview-results";
+type Tab = "dashboard" | "approvals" | "users" | "assessments" | "questions" | "generate" | "batches" | "results" | "interviews" | "interview-results" | "settings";
 
 const NAV_ITEMS: { key: Tab; label: string; icon: React.ReactNode }[] = [
   {
@@ -104,6 +105,15 @@ const NAV_ITEMS: { key: Tab; label: string; icon: React.ReactNode }[] = [
     icon: (
       <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
         <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15a2.25 2.25 0 012.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V19.5a2.25 2.25 0 002.25 2.25h6.75" />
+      </svg>
+    ),
+  },
+  {
+    key: "settings",
+    label: "Settings",
+    icon: (
+      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+        <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" />
       </svg>
     ),
   },
@@ -340,6 +350,7 @@ export default function AdminHome() {
           {activeTab === "results" && <Results batches={batches} />}
           {activeTab === "interviews" && <Interviews setMessage={setMessage} />}
           {activeTab === "interview-results" && <InterviewResults setMessage={setMessage} />}
+          {activeTab === "settings" && <Settings setMessage={setMessage} />}
         </div>
       </main>
     </div>

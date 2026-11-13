@@ -846,6 +846,9 @@ export default function ExamPage({ assessmentId, userKey, onExit }: Props) {
               <p className="text-sm text-[var(--color-text-secondary)]">
                 You exceeded the maximum allowed violations. Your partial answers have been saved.
               </p>
+              <p className="mt-2 text-sm text-[var(--color-text-secondary)]">
+                If this happened by mistake, ask your administrator. They can let you resume this attempt with your saved answers.
+              </p>
             </>
           )}
           <button

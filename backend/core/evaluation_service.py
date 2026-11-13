@@ -41,6 +41,7 @@ from pydantic import BaseModel, Field
 from core.sql_runner import run_sql_test_case
 from core.code_runner import ensure_execution_available
 from core.assessment_timing import checkpoint_active_time, remaining_active_seconds
+from core.coding_llm_review import evaluate_code_with_llm, get_coding_llm_settings
 
 logger = get_logger(__name__)
 EVALUATION_WORKER_LOCK_ID = 731204891
@@ -160,6 +161,7 @@ def evaluate_attempt_from_job(db: Session, attempt_id: UUID):
         return
 
     answers = db.query(Answer).filter(Answer.attempt_id == attempt_id).all()
+    coding_llm = get_coding_llm_settings(db)  # Admin > Settings: LLM grading for Python coding
     total_score = 0.0
     evaluation_failures: list[str] = []
     # Scores are percentages of every question selected for the assessment,
@@ -237,13 +239,25 @@ def evaluate_attempt_from_job(db: Session, attempt_id: UUID):
             )
         elif q_type == QuestionType.coding:
             # Run code against ALL test cases and score by pass rate
-            if ans.score is not None and ans.evaluated_by == EvaluationType.auto:
+            if ans.score is not None and ans.evaluated_by in (EvaluationType.auto, EvaluationType.llm):
                 total_score += float(ans.score)
                 if topic_key:
                     topic_totals[topic_key] += float(ans.score)
                     evaluated_topic_counts[topic_key] = evaluated_topic_counts.get(topic_key, 0) + 1
                 continue
-            if question:
+            graded_by = EvaluationType.auto
+            source = question or item
+            is_sql_source = bool(source.default_code and str(source.default_code).strip().startswith("--"))
+            if coding_llm.enabled and not is_sql_source:
+                # Admin setting: the LLM grades Python code; test cases are not run or scored.
+                graded_by = EvaluationType.llm
+                try:
+                    score, feedback = _evaluate_coding_with_llm(source, ans.answer or "", coding_llm.prompt)
+                except Exception as exc:
+                    logger.warning("LLM coding evaluation failed for attempt %s: %s", attempt_id, exc)
+                    evaluation_failures.append(str(exc))
+                    continue
+            elif question:
                 try:
                     score, feedback = _evaluate_coding_with_tests(db, question, ans.answer or "")
                 except Exception as exc:
@@ -305,7 +319,7 @@ def evaluate_attempt_from_job(db: Session, attempt_id: UUID):
                         if failures:
                             feedback += " Failures: " + "; ".join(failures[:2])
             ans.score = score
-            ans.evaluated_by = EvaluationType.auto
+            ans.evaluated_by = graded_by
             ans.feedback = feedback
         elif q_type == QuestionType.coding_output:
             # Output-only coding: no test cases and no LLM. Score 1 if the code runs, else 0.
@@ -449,6 +463,23 @@ def _evaluate_coding_with_tests(db: Session, question: Question, user_answer: st
             feedback += " Failures: " + "; ".join(failures[:2])
 
     return score, feedback
+
+
+def _evaluate_coding_with_llm(question, user_answer: str, instructions: str) -> tuple:
+    """Grade a Python coding answer with the LLM (admin setting); test cases are context only."""
+    examples = []
+    for tc in (question.test_cases or [])[:5]:
+        if isinstance(tc, dict):  # per-assessment item: JSON test cases
+            examples.append((tc.get("input", ""), tc.get("expected_output", "")))
+        else:  # question bank: TestCase rows
+            examples.append((tc.input_data, tc.expected_output))
+    return evaluate_code_with_llm(
+        getattr(question, "question_text", None) or getattr(question, "question", "") or "",
+        _assemble_full_code(question, user_answer) if user_answer.strip() else "",
+        reference_answer=question.reference_answer,
+        examples=examples,
+        instructions=instructions,
+    )
 
 
 def _evaluate_coding_output(question, user_answer: str) -> tuple:

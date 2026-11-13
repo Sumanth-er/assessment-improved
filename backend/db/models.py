@@ -468,6 +468,29 @@ class EvaluationJob(Base):
     attempt = relationship("Attempt", foreign_keys=[attempt_id])
 
 
+class AppSetting(Base):
+    """Admin-editable settings stored as JSON by key (for example LLM coding evaluation)."""
+    __tablename__ = "app_settings"
+
+    key = Column(String(100), primary_key=True)
+    value = Column(JSON, nullable=False)
+    updated_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class AttemptImprovementPlan(Base):
+    """AI-generated improvement areas and action plan for one evaluated attempt."""
+    __tablename__ = "attempt_improvement_plans"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    attempt_id = Column(
+        UUID(as_uuid=True), ForeignKey("attempts.id", ondelete="CASCADE"), nullable=False, unique=True
+    )
+    plan = Column(JSON, nullable=False)
+    created_at = Column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+
+
 # -------------- PRACTICE TEST (Self-Assessment) -------------- #
 
 class PracticeAccessStatus(str, enum.Enum):

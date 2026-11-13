@@ -21,6 +21,7 @@ MIGRATION_VERSIONS = (
     "20261028_attempt_active_time_precision",
     "20261029_attempt_offline_sync_grace",
     "20261106_coding_output_question_type",
+    "20261113_app_settings_and_improvement_plans",
 )
 
 
@@ -392,6 +393,24 @@ def upgrade_coding_output_question_type(engine: Engine) -> None:
         connection = connection.execution_options(isolation_level="AUTOCOMMIT")
         connection.execute(text(
             "ALTER TYPE questiontype ADD VALUE IF NOT EXISTS 'coding_output'"
+        ))
+
+
+def upgrade_app_settings_and_improvement_plans(engine: Engine) -> None:
+    """Store admin settings (LLM coding evaluation) and per-attempt improvement plans."""
+    with engine.begin() as connection:
+        connection.execute(text(
+            "CREATE TABLE IF NOT EXISTS app_settings ("
+            "key VARCHAR(100) PRIMARY KEY, "
+            "value JSON NOT NULL, "
+            "updated_at TIMESTAMP WITH TIME ZONE NULL)"
+        ))
+        connection.execute(text(
+            "CREATE TABLE IF NOT EXISTS attempt_improvement_plans ("
+            "id UUID PRIMARY KEY, "
+            "attempt_id UUID NOT NULL UNIQUE REFERENCES attempts(id) ON DELETE CASCADE, "
+            "plan JSON NOT NULL, "
+            "created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP)"
         ))
 
 

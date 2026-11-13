@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import api from "../../api";
+import ImprovementPlanPanel from "../../components/ImprovementPlanPanel";
 import type { BatchInfo } from "../admin/types";
 
 interface UserProfile {
@@ -562,6 +563,10 @@ export default function Dashboard({ profile, onStartExam }: Props) {
                         ))}
                       </div>
                     </div>
+                  )}
+
+                  {results.status === "completed" && !results.evaluation_pending && (
+                    <ImprovementPlanPanel key={viewingResults} endpoint={`/user/assessments/${viewingResults}/improvement-plan`} />
                   )}
 
                   {/*  */}

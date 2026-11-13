@@ -3,6 +3,7 @@ import api from "../../api";
 import type { AssessmentListItem, BatchInfo } from "./types";
 import { card, selectClass } from "./types";
 import CircularProgress from "../../components/CircularProgress";
+import ImprovementPlanPanel from "../../components/ImprovementPlanPanel";
 
 interface TopicPerformance {
   topic_name: string;
@@ -83,6 +84,7 @@ export default function Results({ batches }: Props) {
   const [results, setResults] = useState<AssessmentResults | null>(null);
   const [loading, setLoading] = useState(false);
   const [resettingAttemptId, setResettingAttemptId] = useState<string | null>(null);
+  const [resumingAttemptId, setResumingAttemptId] = useState<string | null>(null);
   const [retryingJobId, setRetryingJobId] = useState<string | null>(null);
   const [errorModalUser, setErrorModalUser] = useState<UserAttemptResult | null>(null);
   const [showTopicModal, setShowTopicModal] = useState(false);
@@ -190,6 +192,27 @@ export default function Results({ batches }: Props) {
       alert("Failed to reset attempt");
     } finally {
       setResettingAttemptId(null);
+    }
+  };
+
+  const handleResumeAttempt = async (attemptId: string | null, userName: string) => {
+    if (!attemptId) return;
+    if (!window.confirm(`Let ${userName} continue this attempt? Their saved answers and remaining time are kept, and the tab-violation count is reset to 0. They can resume it from their dashboard.`)) {
+      return;
+    }
+
+    setResumingAttemptId(attemptId);
+    try {
+      await api.post(`/admin/resume-attempt/${attemptId}`);
+      if (selectedAssessment) {
+        await loadResults(selectedAssessment);
+      }
+    } catch (err: unknown) {
+      console.error(err);
+      const detail = (err as { response?: { data?: { detail?: unknown } } }).response?.data?.detail;
+      alert(typeof detail === "string" ? detail : "Failed to resume attempt");
+    } finally {
+      setResumingAttemptId(null);
     }
   };
 
@@ -393,6 +416,10 @@ export default function Results({ batches }: Props) {
                         ))}
                       </div>
                     </div>
+                  )}
+
+                  {!attemptResults.evaluation_pending && (
+                    <ImprovementPlanPanel key={viewingAttempt} endpoint={`/admin/attempt/${viewingAttempt}/improvement-plan`} allowRegenerate />
                   )}
 
                   <div className={`${card} overflow-hidden`}>
@@ -769,6 +796,16 @@ export default function Results({ batches }: Props) {
                           >
                             Topics
                           </button>
+                          {ur.status === "missed" && ur.attempt_id && (
+                            <button
+                              onClick={() => handleResumeAttempt(ur.attempt_id, ur.user_name)}
+                              disabled={resumingAttemptId === ur.attempt_id}
+                              title="Reset the tab-violation count and let the candidate continue this attempt"
+                              className="px-2 py-1.5 text-xs font-medium rounded bg-amber-100 text-amber-800 hover:bg-amber-200 disabled:opacity-50 cursor-pointer transition-colors"
+                            >
+                              {resumingAttemptId === ur.attempt_id ? "Resuming..." : "Resume"}
+                            </button>
+                          )}
                           {((ur.status === "completed" && ur.evaluation_status === "completed" && ur.score !== null) || ur.status === "missed") && ur.attempt_id && (
                             <button
                               onClick={() => handleResetAttempt(ur.attempt_id, ur.user_name)}

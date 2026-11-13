@@ -12,9 +12,17 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import or_
 
-from app.llms import get_chat_model
+from app.llms import AIServiceUnavailable, get_chat_model
 from core.auth import get_current_user
 from core.evaluation_service import finalize_attempt_at_deadline, queue_attempt_evaluation
+from core.improvement_plan import (
+    ImprovementPlanOut,
+    append_improvement_summary,
+    get_or_create_improvement_plan,
+    improvement_cells,
+    improvement_headers,
+    load_improvement_plan,
+)
 from core.assessment_timing import checkpoint_active_time, remaining_active_seconds, start_active_session
 from db.database import SessionLocal
 from db.models import (
@@ -1086,6 +1094,35 @@ async def get_my_results(
     return await run_db_sync(_sync_work)
 
 
+@router.post("/{assessment_id}/improvement-plan", response_model=ImprovementPlanOut)
+async def get_my_improvement_plan(
+    assessment_id: UUID,
+    user: User = Depends(get_current_user),
+):
+    """Get Improvement Areas: generate once with the LLM, then return the stored plan."""
+
+    def _find_attempt():
+        db = SessionLocal()
+        try:
+            attempt = (
+                _completed_attempt_for_user_assessment(db, user.id, assessment_id)
+                or _latest_attempt_for_user_assessment(db, user.id, assessment_id)
+            )
+            if not attempt:
+                raise HTTPException(status_code=404, detail="No attempt found for this assessment")
+            from .results_helpers import require_completed_attempt
+            require_completed_attempt(attempt)
+            return attempt.id
+        finally:
+            db.close()
+
+    attempt_id = await run_db_sync(_find_attempt)
+    try:
+        return await run_db_sync(get_or_create_improvement_plan, attempt_id)
+    except AIServiceUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
 def _safe_filename_part(value: str) -> str:
     sanitized = re.sub(r'[^A-Za-z0-9._-]+', '_', value.strip())
     return sanitized.strip('_') or 'value'
@@ -1125,7 +1162,12 @@ async def export_my_results(
             except ValueError as e:
                 raise HTTPException(status_code=404, detail=str(e))
 
-            return {"results": results, "assessment_title": assessment.title, "attempt_started_at": to_utc_iso(attempt.started_at)}
+            return {
+                "results": results,
+                "assessment_title": assessment.title,
+                "attempt_started_at": to_utc_iso(attempt.started_at),
+                "improvement_plan": load_improvement_plan(db, attempt.id),
+            }
         finally:
             db.close()
 
@@ -1133,6 +1175,7 @@ async def export_my_results(
     results = payload.get("results", {})
     assessment_title = payload.get("assessment_title")
     started_iso = payload.get("attempt_started_at")
+    plan = payload.get("improvement_plan")
 
     workbook = Workbook()
     summary_sheet = workbook.active
@@ -1154,6 +1197,7 @@ async def export_my_results(
             topic_score.get("total"),
             topic_score.get("percentage"),
         ])
+    append_improvement_summary(summary_sheet, plan)
 
     detail_sheet = workbook.create_sheet("Question Review")
     detail_sheet.append([
@@ -1165,6 +1209,7 @@ async def export_my_results(
         "Correct Answer",
         "Score",
         "Suggestion",
+        *improvement_headers(plan),
     ])
     for index, answer in enumerate(results.get("answers", []), start=1):
         detail_sheet.append([
@@ -1176,6 +1221,7 @@ async def export_my_results(
             answer.get("correct_answer"),
             answer_score_label(answer.get("answer_status", "awaiting_evaluation"), answer.get("score")),
             answer.get("suggestion") or "",
+            *improvement_cells(plan, answer),
         ])
 
     buffer = BytesIO()
