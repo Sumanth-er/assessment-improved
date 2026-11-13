@@ -426,7 +426,7 @@ export default function Results({ batches }: Props) {
                                   </div>
                                 )}
                               </div>
-                              {ans.suggestion && (ans.question_type === "text" || ans.question_type === "coding") && (
+                              {ans.suggestion && (ans.question_type === "text" || ans.question_type === "coding" || ans.question_type === "coding_output") && (
                                 <div className="mt-2 p-3 rounded bg-blue-50 border border-blue-100 text-xs text-[var(--color-primary)]">
                                   <span className="font-medium">Suggestion: </span>
                                   <span>{ans.suggestion}</span>

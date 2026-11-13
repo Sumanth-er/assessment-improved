@@ -48,6 +48,7 @@ class QuestionType(str, enum.Enum):
     multi_mcq = "multi_mcq"
     text = "text"
     coding = "coding"
+    coding_output = "coding_output"  # Coding without test cases: scored 1 if the code runs
 
 
 class Difficulty(str, enum.Enum):

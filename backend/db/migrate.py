@@ -19,6 +19,7 @@ from db.schema_migrations import (
     upgrade_attempt_active_time,
     upgrade_attempt_active_time_precision,
     upgrade_attempt_offline_sync_grace,
+    upgrade_coding_output_question_type,
 )
 from core.vector_store import ensure_pgvector_ready
 
@@ -49,6 +50,7 @@ def main() -> None:
             (MIGRATION_VERSIONS[9], upgrade_attempt_active_time),
             (MIGRATION_VERSIONS[10], upgrade_attempt_active_time_precision),
             (MIGRATION_VERSIONS[11], upgrade_attempt_offline_sync_grace),
+            (MIGRATION_VERSIONS[12], upgrade_coding_output_question_type),
         )
         for version, upgrade in steps:
             with engine.connect() as connection:

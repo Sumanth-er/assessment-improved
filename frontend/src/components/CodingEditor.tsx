@@ -36,6 +36,7 @@ interface Props {
   disablePaste?: boolean;
   onPasteAttempt?: () => void;
   readOnly?: boolean;
+  outputOnly?: boolean; // coding_output questions: no test cases, just show the program output
 }
 
 const EDITABLE_START = "# --- EDITABLE START ---";
@@ -89,10 +90,11 @@ export default function CodingEditor({
   disablePaste,
   onPasteAttempt,
   readOnly = false,
+  outputOnly = false,
 }: Props) {
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState<TestCaseResult[] | null>(null);
-  const [activeTab, setActiveTab] = useState<"testcases" | "results">("testcases");
+  const [activeTab, setActiveTab] = useState<"testcases" | "results">(outputOnly ? "results" : "testcases");
   const dividerRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [leftWidth, setLeftWidth] = useState(40);
@@ -307,7 +309,7 @@ export default function CodingEditor({
               {sectionName}
             </span>
             <span className="text-xs font-medium px-2 py-0.5 rounded bg-purple-900/40 text-purple-200">
-              CODING
+              {outputOnly ? "CODING (OUTPUT ONLY)" : "CODING"}
             </span>
             <span className={`text-xs font-medium px-2 py-0.5 rounded ${
               difficulty === "easy" ? "bg-green-900 text-green-300" :
@@ -427,6 +429,7 @@ export default function CodingEditor({
         <div className="h-48 flex-shrink-0 border-t border-gray-700 bg-gray-800 flex flex-col overflow-hidden">
           {/* Tabs */}
           <div className="flex items-center border-b border-gray-700 px-3">
+            {!outputOnly && (
             <button
               onClick={() => setActiveTab("testcases")}
               className={`px-3 py-2 text-xs font-medium border-b-2 cursor-pointer ${
@@ -437,6 +440,7 @@ export default function CodingEditor({
             >
               Test Cases
             </button>
+            )}
             <button
               onClick={() => setActiveTab("results")}
               className={`px-3 py-2 text-xs font-medium border-b-2 cursor-pointer ${
@@ -445,8 +449,8 @@ export default function CodingEditor({
                   : "border-transparent text-gray-400 hover:text-gray-200"
               }`}
             >
-              Results
-              {results && (
+              {outputOnly ? "Output" : "Results"}
+              {results && !outputOnly && (
                 <span className={`ml-1.5 px-1.5 py-0.5 rounded text-[10px] ${
                   passedCount === totalCount ? "bg-green-900 text-green-300" : "bg-red-900 text-red-300"
                 }`}>
@@ -477,7 +481,26 @@ export default function CodingEditor({
               </div>
             )}
 
-            {activeTab === "results" && (
+            {activeTab === "results" && outputOnly && (
+              <div className="space-y-2 text-xs">
+                {running ? (
+                  <p className="text-gray-400">Running...</p>
+                ) : !results ? (
+                  <p className="text-gray-500">Run your code to see its output.</p>
+                ) : (
+                  results.map((r, idx) => (
+                    <div key={r.test_case_id + idx} className="space-y-1">
+                      <pre className="text-gray-200 bg-gray-900 rounded px-2 py-1.5 whitespace-pre-wrap break-words">
+                        {r.actual_output || "(no output)"}
+                      </pre>
+                      {r.error && <div className="text-red-400">Error: {r.error}</div>}
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+
+            {activeTab === "results" && !outputOnly && (
               <div className="space-y-2">
                 {!results ? (
                   <p className="text-xs text-gray-500">Run your code to see results.</p>

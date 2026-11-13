@@ -244,6 +244,10 @@ export default function Questions({ topics, setMessage, reloadTopics }: Props) {
       payload.test_cases = editTestCases.map((tc) => ({ input: tc.input, expected_output: tc.expected_output, is_sample: !!tc.is_sample }));
     }
 
+    if (editType === "coding_output") {
+      payload.default_code = editDefaultCode;
+    }
+
     if (editType === "single_mcq" || editType === "multi_mcq") {
       payload.options = editOptions.map((o) => ({ text: o.text, is_correct: !!o.is_correct }));
     }
@@ -499,6 +503,7 @@ export default function Questions({ topics, setMessage, reloadTopics }: Props) {
                         <option value="multi_mcq">Multi MCQ</option>
                         <option value="text">Text Q&A</option>
                         <option value="coding">Coding</option>
+                        <option value="coding_output">Coding (Output Only)</option>
                       </select>
                     </div>
                     <div>
@@ -537,6 +542,14 @@ export default function Questions({ topics, setMessage, reloadTopics }: Props) {
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">Reference Answer (optional)</label>
                       <textarea value={editReferenceAnswer} onChange={(e) => setEditReferenceAnswer(e.target.value)} rows={4} className="w-full px-3 py-2 border border-[var(--color-border)] rounded-[var(--radius-sm)] text-sm focus:border-[var(--color-primary)] focus:ring-2 focus:ring-blue-100" />
+                    </div>
+                  )}
+
+                  {editType === "coding_output" && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">Default Code (optional)</label>
+                      <textarea value={editDefaultCode} onChange={(e) => setEditDefaultCode(e.target.value)} rows={6} className="w-full px-3 py-2 border border-[var(--color-border)] rounded-[var(--radius-sm)] text-sm font-mono focus:border-[var(--color-primary)] focus:ring-2 focus:ring-blue-100" />
+                      <p className="text-xs text-gray-500 mt-1">No test cases. The answer scores 1 if the code runs without an error.</p>
                     </div>
                   )}
 
@@ -701,6 +714,7 @@ export default function Questions({ topics, setMessage, reloadTopics }: Props) {
             <option value="multi_mcq">Multi MCQ</option>
             <option value="text">Text</option>
             <option value="coding">Coding</option>
+            <option value="coding_output">Coding (Output Only)</option>
           </select>
           <select value={filterDifficulty} onChange={(e) => setFilterDifficulty(e.target.value)} className={selectClass}>
             <option value="">All Difficulties</option>

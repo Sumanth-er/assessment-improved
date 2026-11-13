@@ -118,6 +118,9 @@ async def run_code(
             question = db.query(Question).filter(Question.id == body.question_id).first()
             if not question:
                 raise HTTPException(status_code=404, detail="Question not found")
+            if question.type == QuestionType.coding_output:
+                # Output-only question: no test cases, run the code once with empty input.
+                return [{"id": question.id, "input_data": "", "expected_output": "", "is_sample": True, "output_only": True}]
             if question.type != QuestionType.coding:
                 raise HTTPException(status_code=400, detail="Not a coding question")
 
@@ -155,6 +158,10 @@ async def run_code(
             ensure_execution_available(result)
         except RuntimeError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
+        if test_case.get("output_only"):
+            # No expected output: the run passes when the code runs without an error.
+            ran = result.get("exit_code") == 0
+            result = {**result, "passed": ran, "error": None if ran else result.get("error")}
         results_list.append({
             "test_case_id": test_case["id"],
             "passed": bool(result.get("passed")),

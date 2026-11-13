@@ -1087,7 +1087,7 @@ export default function ExamPage({ assessmentId, userKey, onExit }: Props) {
 
         {/* Question Area */}
         <main className="flex-1 flex overflow-hidden min-h-0">
-          {question.type === "coding" ? (
+          {question.type === "coding" || question.type === "coding_output" ? (
             <CodingEditor
               key={question.id}
               questionId={question.id}
@@ -1101,6 +1101,7 @@ export default function ExamPage({ assessmentId, userKey, onExit }: Props) {
               disablePaste={phase === "exam"}
               onPasteAttempt={() => handleViolation()}
               readOnly={answersLocked}
+              outputOnly={question.type === "coding_output"}
             />
           ) : (
           <div className="flex-1 p-8 overflow-y-auto">

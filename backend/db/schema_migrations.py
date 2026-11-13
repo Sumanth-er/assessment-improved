@@ -20,6 +20,7 @@ MIGRATION_VERSIONS = (
     "20261028_attempt_active_time",
     "20261028_attempt_active_time_precision",
     "20261029_attempt_offline_sync_grace",
+    "20261106_coding_output_question_type",
 )
 
 
@@ -379,6 +380,18 @@ def upgrade_attempt_offline_sync_grace(engine: Engine) -> None:
         connection.execute(text(
             "ALTER TABLE attempts ADD COLUMN IF NOT EXISTS sync_deadline_at "
             "TIMESTAMP WITH TIME ZONE NULL"
+        ))
+
+
+def upgrade_coding_output_question_type(engine: Engine) -> None:
+    """Add the output-only coding question type to the PostgreSQL enum."""
+    if engine.dialect.name != "postgresql":
+        return
+    # Older PostgreSQL versions cannot run ADD VALUE inside a transaction block.
+    with engine.connect() as connection:
+        connection = connection.execution_options(isolation_level="AUTOCOMMIT")
+        connection.execute(text(
+            "ALTER TYPE questiontype ADD VALUE IF NOT EXISTS 'coding_output'"
         ))
 
 

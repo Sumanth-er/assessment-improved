@@ -307,6 +307,23 @@ def evaluate_attempt_from_job(db: Session, attempt_id: UUID):
             ans.score = score
             ans.evaluated_by = EvaluationType.auto
             ans.feedback = feedback
+        elif q_type == QuestionType.coding_output:
+            # Output-only coding: no test cases and no LLM. Score 1 if the code runs, else 0.
+            if ans.score is not None and ans.evaluated_by == EvaluationType.auto:
+                total_score += float(ans.score)
+                if topic_key:
+                    topic_totals[topic_key] += float(ans.score)
+                    evaluated_topic_counts[topic_key] = evaluated_topic_counts.get(topic_key, 0) + 1
+                continue
+            try:
+                score, feedback = _evaluate_coding_output(question or item, ans.answer or "")
+            except Exception as exc:
+                logger.warning("Output-only coding evaluation failed for attempt %s: %s", attempt_id, exc)
+                evaluation_failures.append(str(exc))
+                continue
+            ans.score = score
+            ans.evaluated_by = EvaluationType.auto
+            ans.feedback = feedback
         else:
             # Subjective question - evaluate with LLM
             # If already evaluated successfully, skip re-evaluation
@@ -432,6 +449,22 @@ def _evaluate_coding_with_tests(db: Session, question: Question, user_answer: st
             feedback += " Failures: " + "; ".join(failures[:2])
 
     return score, feedback
+
+
+def _evaluate_coding_output(question, user_answer: str) -> tuple:
+    """Run output-only code once (no test cases, no LLM): 1 if it runs without an error, else 0."""
+    from core.code_runner import run_test_case
+
+    if not user_answer.strip():
+        return 0.0, "No code provided."
+    full_code = _assemble_full_code(question, user_answer)
+    is_sql = bool(question.default_code and str(question.default_code).strip().startswith("--"))
+    result = (run_sql_test_case if is_sql else run_test_case)(full_code, "", "")
+    ensure_execution_available(result)
+    if result.get("exit_code") == 0:
+        output = (result.get("actual_output") or "").strip()
+        return 1.0, "Code ran successfully." + (f" Output: {output[:500]}" if output else "")
+    return 0.0, f"Code did not run: {result.get('error') or 'execution failed'}"
 
 
 def _evaluate_subjective_with_llm(

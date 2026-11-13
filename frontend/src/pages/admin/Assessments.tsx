@@ -804,6 +804,7 @@ export default function Assessments({ topics, batches, users, setMessage }: Prop
                             <option value="multi_mcq">Multi MCQ</option>
                             <option value="text">Text</option>
                             <option value="coding">Coding</option>
+                            <option value="coding_output">Coding (Output Only)</option>
                           </select>
                         </div>
                         <div>
